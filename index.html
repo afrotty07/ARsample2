@@ -1,131 +1,125 @@
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <title>Marker WebAR (MindAR + Three.js)</title>
-    <style>
-        html,
-        body {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            background: #000;
-        }
-
-        /* MindARのvideo/canvasが全画面で重なる */
-        #ar-container {
-            position: fixed;
-            inset: 0;
-            overflow: hidden;
-        }
-
-        /* 画面上にちょっとしたUI */
-        .ui {
-            position: fixed;
-            left: 12px;
-            right: 12px;
-            bottom: 12px;
-            display: flex;
-            gap: 8px;
-            justify-content: space-between;
-            pointer-events: none;
-            color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
-            font-size: 14px;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
-        }
-
-        .pill {
-            pointer-events: auto;
-            background: rgba(0, 0, 0, .45);
-            border: 1px solid rgba(255, 255, 255, .2);
-            padding: 8px 10px;
-            border-radius: 999px;
-        }
-
-        .hint {
-            pointer-events: none;
-        }
-    </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Marker WebAR (MindAR + Three.js) – iOS安定版</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#000;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;}
+  #ar-container{position:fixed;inset:0;overflow:hidden;}
+  .ui{position:fixed;left:12px;right:12px;bottom:12px;display:flex;gap:8px;justify-content:space-between;pointer-events:none;color:#fff;font-size:14px;text-shadow:0 1px 2px rgba(0,0,0,.6);}
+  .pill{pointer-events:auto;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.2);padding:8px 10px;border-radius:999px}
+  .btn{pointer-events:auto;background:#0a84ff;border:none;color:#fff;font-weight:700;padding:10px 14px;border-radius:12px;cursor:pointer}
+  .warn{position:fixed;left:12px;right:12px;top:12px;color:#ffd399;background:#3a2a04;border:1px solid #5b4310;border-radius:10px;padding:8px 10px;display:none}
+  .error{position:fixed;left:12px;right:12px;top:54px;color:#ffb4b4;background:#4a0c0c;border:1px solid #7a2020;border-radius:10px;padding:8px 10px;display:none;white-space:pre-wrap}
+</style>
 </head>
-
 <body>
-    <div id="ar-container"></div>
-    <div class="ui">
-        <div class="pill">🎯 マーカーにカメラを向けてください</div>
-        <div class="hint">明るい場所・無地背景が安定</div>
-    </div>
+  <div id="ar-container"></div>
 
-    <!-- Three.js（UMD） -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
-    <!-- MindAR（Image Tracking / Three.js 統合ビルド） -->
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+  <div id="warn" class="warn">Safariで開いてください（アプリ内ブラウザはカメラが使えません）。HTTPSとカメラ許可も必要です。</div>
+  <div id="err" class="error"></div>
 
-    <!-- GLTFLoader は ES Module を使う -->
-    <script type="module">
-        import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/loaders/GLTFLoader.js";
+  <div class="ui">
+    <div class="pill">🎯 マーカーにカメラを向けてください</div>
+    <button id="startBtn" class="btn">ARを開始</button>
+  </div>
 
-        // 1) MindAR初期化
+  <!-- Three.js（UMD） -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
+  <!-- MindAR（Image Tracking / Three.js 統合ビルド） -->
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+
+  <!-- GLTFLoader は ES Module を使う -->
+  <script type="module">
+    import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/loaders/GLTFLoader.js";
+
+    // 簡易：Safari/アプリ内ブラウザ警告
+    (function(){
+      const ua = navigator.userAgent;
+      const inApp = /(FBAN|FBAV|Instagram|Line|Twitter|WeChat|MicroMessenger)/i.test(ua);
+      const isSafari = /^((?!chrome|android).)*safari/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      if (!isSafari || inApp) document.getElementById("warn").style.display = "block";
+      if (location.protocol !== "https:") document.getElementById("warn").style.display = "block";
+    })();
+
+    const startBtn = document.getElementById("startBtn");
+    const errBox = document.getElementById("err");
+
+    let started = false;
+
+    startBtn.addEventListener("click", async () => {
+      if (started) return;
+      started = true;
+      startBtn.disabled = true;
+
+      try {
+        // 1) MindAR初期化（背面カメラ/環境カメラを強制）
         const mindarThree = new window.MINDAR.IMAGE.MindARThree({
-            container: document.querySelector("#ar-container"),
-            imageTargetSrc: "./targets.mind",   // 複数画像対応可（後述）
-            uiScanning: false,                   // 独自UIを使うためMindAR標準UIはOFF
-            uiLoading: "no",                     // ローディングUI無効（任意）
-            filterMinCF: 0.001,                 // 認識の安定度調整（必要に応じて）
-            warmupTolerance: 0.0
+          container: document.querySelector("#ar-container"),
+          imageTargetSrc: "./targets.mind",
+          uiScanning: false,
+          uiLoading: "no",
+          // ★ iOS向け：背面カメラ指定（失敗時は自動フォールバック）
+          //   一部端末では facingMode が効かないこともありますが、指定しておくと成功率が上がります
+          videoSettings: { facingMode: { exact: "environment" } }
         });
 
         const { renderer, scene, camera } = mindarThree;
 
-        // 2) 照明（軽量＆見えやすさ重視）
-        const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 1.0);
-        scene.add(hemi);
-        const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-        dir.position.set(1, 1.5, 1);
-        scene.add(dir);
+        // 2) 照明
+        const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 1.0); scene.add(hemi);
+        const dir  = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(1,1.5,1); scene.add(dir);
 
-        // 3) アンカー（targets.mind の 0番ターゲットに紐づく「原点」）
+        // 3) アンカー
         const anchor = mindarThree.addAnchor(0);
 
-        // 4) GLBモデル読み込み
+        // 4) モデル
         const loader = new GLTFLoader();
         let model;
-        loader.load(
-            "./model.glb",
-            (gltf) => {
-                model = gltf.scene;
-                // スケールと初期姿勢はマーカー実寸に合わせて調整
-                model.scale.set(0.2, 0.2, 0.2);      // 小さければ数値を上げる
-                model.position.set(0, 0, 0);         // アンカー原点（マーカー中心）に座標合わせ
-                model.rotation.set(0, 0, 0);
-                anchor.group.add(model);
-            },
-            (ev) => { /* 読み込み進捗（任意） */ },
-            (err) => { console.error("GLB読み込み失敗:", err); }
-        );
+        loader.load("./model.glb", (gltf) => {
+          model = gltf.scene;
+          model.scale.set(0.2,0.2,0.2);
+          anchor.group.add(model);
+        }, undefined, (e)=> showError("GLB読み込み失敗: " + e.message));
 
-        // 5) ターゲット検出時のイベント（任意演出）
-        anchor.onTargetFound = () => {
-            console.log("Target Found");
-            // 例：アニメ再生や音声再生などのトリガー
-        };
-        anchor.onTargetLost = () => {
-            console.log("Target Lost");
-            // 例：一時停止・フェードアウトなど
-        };
+        anchor.onTargetFound = () => {/* 演出あればここ */};
+        anchor.onTargetLost  = () => {/* 演出あればここ */};
 
-        // 6) スタート＆レンダーループ
+        // 5) スタート（ユーザージェスチャ内）
         await mindarThree.start();
-        renderer.setAnimationLoop(() => {
-            // 軽いアニメ（任意）
-            if (model) model.rotation.y += 0.01;
-            renderer.render(scene, camera);
+
+        // 6) レンダーループ
+        renderer.setAnimationLoop(()=> {
+          if (model) model.rotation.y += 0.01;
+          renderer.render(scene, camera);
         });
+      } catch (e) {
+        showError(explainError(e));
+        startBtn.disabled = false;
+        started = false;
+      }
+    });
 
-        // 画面リサイズ対策は MindAR 内部で処理されるため通常不要
-    </script>
+    function showError(msg){
+      errBox.textContent = String(msg || "Unknown Error");
+      errBox.style.display = "block";
+    }
+
+    // iOSでよくある失敗の文言を分かりやすく
+    function explainError(e){
+      const msg = (e && (e.message || e.name)) ? `${e.name || ""} ${e.message || ""}` : String(e);
+      if (/NotAllowedError|Permission/i.test(msg)) {
+        return "カメラの使用が許可されていません。Safariの設定でこのサイトの「カメラを許可」にしてください。";
+      }
+      if (/NotFoundError|DevicesNotFound|OverconstrainedError/i.test(msg)) {
+        return "カメラデバイスが見つかりません。端末のカメラ使用制限やスクリーンタイム設定を確認してください。";
+      }
+      if (/TypeError|load/i.test(msg)) {
+        return "ライブラリまたはモデルの読み込みに失敗しました。ネットワーク状況とファイルパス（./targets.mind, ./model.glb）を確認してください。";
+      }
+      return msg || "起動に失敗しました。HTTPS・Safariで開いているか・カメラ許可をご確認ください。";
+    }
+  </script>
 </body>
-
 </html>
