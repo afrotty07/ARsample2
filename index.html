@@ -1,125 +1,62 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Marker WebAR (MindAR + Three.js) – iOS安定版</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>iOS カメラ診断</title>
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#000;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;}
-  #ar-container{position:fixed;inset:0;overflow:hidden;}
-  .ui{position:fixed;left:12px;right:12px;bottom:12px;display:flex;gap:8px;justify-content:space-between;pointer-events:none;color:#fff;font-size:14px;text-shadow:0 1px 2px rgba(0,0,0,.6);}
-  .pill{pointer-events:auto;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.2);padding:8px 10px;border-radius:999px}
-  .btn{pointer-events:auto;background:#0a84ff;border:none;color:#fff;font-weight:700;padding:10px 14px;border-radius:12px;cursor:pointer}
-  .warn{position:fixed;left:12px;right:12px;top:12px;color:#ffd399;background:#3a2a04;border:1px solid #5b4310;border-radius:10px;padding:8px 10px;display:none}
-  .error{position:fixed;left:12px;right:12px;top:54px;color:#ffb4b4;background:#4a0c0c;border:1px solid #7a2020;border-radius:10px;padding:8px 10px;display:none;white-space:pre-wrap}
+  body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif}
+  video{width:100%;background:#000;max-height:70vh}
+  pre{white-space:pre-wrap;background:#111;color:#eee;padding:10px;border-radius:8px}
+  button{padding:10px 14px;border:none;border-radius:10px;background:#0a84ff;color:#fff;font-weight:700}
 </style>
 </head>
 <body>
-  <div id="ar-container"></div>
-
-  <div id="warn" class="warn">Safariで開いてください（アプリ内ブラウザはカメラが使えません）。HTTPSとカメラ許可も必要です。</div>
-  <div id="err" class="error"></div>
-
-  <div class="ui">
-    <div class="pill">🎯 マーカーにカメラを向けてください</div>
-    <button id="startBtn" class="btn">ARを開始</button>
+  <h1>iOS カメラ診断</h1>
+  <p>1) Safariで開く → 2) 背面から開始 → 3) だめなら前面 → 4) デバイス一覧を確認</p>
+  <div style="display:flex;gap:8px;margin:8px 0 12px;">
+    <button id="startBack">背面カメラで開始</button>
+    <button id="startFront">前面カメラで開始</button>
+    <button id="list">カメラ一覧</button>
   </div>
+  <video id="v" playsinline autoplay muted></video>
+  <h3>ログ</h3>
+  <pre id="log"></pre>
 
-  <!-- Three.js（UMD） -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
-  <!-- MindAR（Image Tracking / Three.js 統合ビルド） -->
-  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+<script>
+const v = document.getElementById('v');
+const log = (m)=>{ const el=document.getElementById('log'); el.textContent += m+"\n"; };
 
-  <!-- GLTFLoader は ES Module を使う -->
-  <script type="module">
-    import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/loaders/GLTFLoader.js";
+async function start(constraints){
+  try{
+    const s = await navigator.mediaDevices.getUserMedia({video: constraints, audio:false});
+    v.srcObject = s;
+    const track = s.getVideoTracks()[0];
+    log("✅ getUserMedia成功: " + JSON.stringify(track.getSettings()));
+  }catch(e){
+    log("❌ getUserMedia失敗: " + (e.name||"") + " " + (e.message||e));
+  }
+}
 
-    // 簡易：Safari/アプリ内ブラウザ警告
-    (function(){
-      const ua = navigator.userAgent;
-      const inApp = /(FBAN|FBAV|Instagram|Line|Twitter|WeChat|MicroMessenger)/i.test(ua);
-      const isSafari = /^((?!chrome|android).)*safari/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-      if (!isSafari || inApp) document.getElementById("warn").style.display = "block";
-      if (location.protocol !== "https:") document.getElementById("warn").style.display = "block";
-    })();
+document.getElementById('startBack').onclick = ()=> start({ facingMode:{ exact:'environment' } });
+document.getElementById('startFront').onclick = ()=> start({ facingMode:'user' });
 
-    const startBtn = document.getElementById("startBtn");
-    const errBox = document.getElementById("err");
+document.getElementById('list').onclick = async ()=>{
+  try{
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    devs.forEach(d=> log(`${d.kind} | ${d.label||'(権限前はラベル非表示)'} | ${d.deviceId}`));
+  }catch(e){ log("enumerateDevices失敗: "+e); }
+};
 
-    let started = false;
-
-    startBtn.addEventListener("click", async () => {
-      if (started) return;
-      started = true;
-      startBtn.disabled = true;
-
-      try {
-        // 1) MindAR初期化（背面カメラ/環境カメラを強制）
-        const mindarThree = new window.MINDAR.IMAGE.MindARThree({
-          container: document.querySelector("#ar-container"),
-          imageTargetSrc: "./targets.mind",
-          uiScanning: false,
-          uiLoading: "no",
-          // ★ iOS向け：背面カメラ指定（失敗時は自動フォールバック）
-          //   一部端末では facingMode が効かないこともありますが、指定しておくと成功率が上がります
-          videoSettings: { facingMode: { exact: "environment" } }
-        });
-
-        const { renderer, scene, camera } = mindarThree;
-
-        // 2) 照明
-        const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 1.0); scene.add(hemi);
-        const dir  = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(1,1.5,1); scene.add(dir);
-
-        // 3) アンカー
-        const anchor = mindarThree.addAnchor(0);
-
-        // 4) モデル
-        const loader = new GLTFLoader();
-        let model;
-        loader.load("./model.glb", (gltf) => {
-          model = gltf.scene;
-          model.scale.set(0.2,0.2,0.2);
-          anchor.group.add(model);
-        }, undefined, (e)=> showError("GLB読み込み失敗: " + e.message));
-
-        anchor.onTargetFound = () => {/* 演出あればここ */};
-        anchor.onTargetLost  = () => {/* 演出あればここ */};
-
-        // 5) スタート（ユーザージェスチャ内）
-        await mindarThree.start();
-
-        // 6) レンダーループ
-        renderer.setAnimationLoop(()=> {
-          if (model) model.rotation.y += 0.01;
-          renderer.render(scene, camera);
-        });
-      } catch (e) {
-        showError(explainError(e));
-        startBtn.disabled = false;
-        started = false;
-      }
-    });
-
-    function showError(msg){
-      errBox.textContent = String(msg || "Unknown Error");
-      errBox.style.display = "block";
-    }
-
-    // iOSでよくある失敗の文言を分かりやすく
-    function explainError(e){
-      const msg = (e && (e.message || e.name)) ? `${e.name || ""} ${e.message || ""}` : String(e);
-      if (/NotAllowedError|Permission/i.test(msg)) {
-        return "カメラの使用が許可されていません。Safariの設定でこのサイトの「カメラを許可」にしてください。";
-      }
-      if (/NotFoundError|DevicesNotFound|OverconstrainedError/i.test(msg)) {
-        return "カメラデバイスが見つかりません。端末のカメラ使用制限やスクリーンタイム設定を確認してください。";
-      }
-      if (/TypeError|load/i.test(msg)) {
-        return "ライブラリまたはモデルの読み込みに失敗しました。ネットワーク状況とファイルパス（./targets.mind, ./model.glb）を確認してください。";
-      }
-      return msg || "起動に失敗しました。HTTPS・Safariで開いているか・カメラ許可をご確認ください。";
-    }
-  </script>
+// UA/環境チェック
+(() => {
+  const ua = navigator.userAgent;
+  const inApp = /(FBAN|FBAV|Instagram|Line|Twitter|WeChat|MicroMessenger)/i.test(ua);
+  const https = location.protocol === 'https:';
+  log(`UA: ${ua}`);
+  log(`HTTPS: ${https}`);
+  log(`アプリ内ブラウザ推定: ${inApp}`);
+})();
+</script>
 </body>
 </html>
