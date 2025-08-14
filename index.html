@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Marker WebAR (MindAR + Three.js)</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background: #000;
+        }
+
+        /* MindARのvideo/canvasが全画面で重なる */
+        #ar-container {
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+        }
+
+        /* 画面上にちょっとしたUI */
+        .ui {
+            position: fixed;
+            left: 12px;
+            right: 12px;
+            bottom: 12px;
+            display: flex;
+            gap: 8px;
+            justify-content: space-between;
+            pointer-events: none;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+            font-size: 14px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
+        }
+
+        .pill {
+            pointer-events: auto;
+            background: rgba(0, 0, 0, .45);
+            border: 1px solid rgba(255, 255, 255, .2);
+            padding: 8px 10px;
+            border-radius: 999px;
+        }
+
+        .hint {
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="ar-container"></div>
+    <div class="ui">
+        <div class="pill">🎯 マーカーにカメラを向けてください</div>
+        <div class="hint">明るい場所・無地背景が安定</div>
+    </div>
+
+    <!-- Three.js（UMD） -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
+    <!-- MindAR（Image Tracking / Three.js 統合ビルド） -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+
+    <!-- GLTFLoader は ES Module を使う -->
+    <script type="module">
+        import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.158/examples/jsm/loaders/GLTFLoader.js";
+
+        // 1) MindAR初期化
+        const mindarThree = new window.MINDAR.IMAGE.MindARThree({
+            container: document.querySelector("#ar-container"),
+            imageTargetSrc: "./targets.mind",   // 複数画像対応可（後述）
+            uiScanning: false,                   // 独自UIを使うためMindAR標準UIはOFF
+            uiLoading: "no",                     // ローディングUI無効（任意）
+            filterMinCF: 0.001,                 // 認識の安定度調整（必要に応じて）
+            warmupTolerance: 0.0
+        });
+
+        const { renderer, scene, camera } = mindarThree;
+
+        // 2) 照明（軽量＆見えやすさ重視）
+        const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 1.0);
+        scene.add(hemi);
+        const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+        dir.position.set(1, 1.5, 1);
+        scene.add(dir);
+
+        // 3) アンカー（targets.mind の 0番ターゲットに紐づく「原点」）
+        const anchor = mindarThree.addAnchor(0);
+
+        // 4) GLBモデル読み込み
+        const loader = new GLTFLoader();
+        let model;
+        loader.load(
+            "./model.glb",
+            (gltf) => {
+                model = gltf.scene;
+                // スケールと初期姿勢はマーカー実寸に合わせて調整
+                model.scale.set(0.2, 0.2, 0.2);      // 小さければ数値を上げる
+                model.position.set(0, 0, 0);         // アンカー原点（マーカー中心）に座標合わせ
+                model.rotation.set(0, 0, 0);
+                anchor.group.add(model);
+            },
+            (ev) => { /* 読み込み進捗（任意） */ },
+            (err) => { console.error("GLB読み込み失敗:", err); }
+        );
+
+        // 5) ターゲット検出時のイベント（任意演出）
+        anchor.onTargetFound = () => {
+            console.log("Target Found");
+            // 例：アニメ再生や音声再生などのトリガー
+        };
+        anchor.onTargetLost = () => {
+            console.log("Target Lost");
+            // 例：一時停止・フェードアウトなど
+        };
+
+        // 6) スタート＆レンダーループ
+        await mindarThree.start();
+        renderer.setAnimationLoop(() => {
+            // 軽いアニメ（任意）
+            if (model) model.rotation.y += 0.01;
+            renderer.render(scene, camera);
+        });
+
+        // 画面リサイズ対策は MindAR 内部で処理されるため通常不要
+    </script>
+</body>
+
+</html>
