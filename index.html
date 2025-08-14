@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Marker WebAR (MindAR + Three.js) – Minimal Stable</title>
+<title>Marker WebAR (MindAR + Three.js) – Video Fix</title>
 <style>
   html,body{margin:0;height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif}
   #ar{position:fixed;inset:0;overflow:hidden}
@@ -15,7 +15,7 @@
 <body>
   <div id="ar"></div>
   <div id="log" class="log">Safari/HTTPS/カメラ許可が必要です。</div>
-  <div class="ui"><button id="start" class="btn">ARを開始</button></div>
+  <div class="ui"><button id="start" class="btn">ARを開始だぴょん</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
@@ -34,13 +34,10 @@
 
     document.getElementById('start').onclick = async ()=>{
       try{
-        // 1) 権限を先に取って label を出す（背面特定用）
         const pre = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ exact:'environment' } }, audio:false }).catch(e=>{ log("pre getUserMedia: "+e.name); return null; });
         const backId = await pickBackId();
         if (pre) pre.getTracks().forEach(t=>t.stop());
-        log("backId: " + backId);
 
-        // 2) MindAR（deviceId優先）
         const videoSettings = backId ? { deviceId:{ exact: backId } } : { facingMode:{ exact:'environment' } };
         const mindar = new window.MINDAR.IMAGE.MindARThree({
           container: document.getElementById('ar'),
@@ -51,23 +48,42 @@
         });
         const {renderer, scene, camera} = mindar;
 
+        // 🔹 背景のビデオ映像が見えるように設定
+        renderer.setClearAlpha(0); // 背景を透過
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        scene.background = null;
+
         scene.add(new THREE.HemisphereLight(0xffffff,0x444466,1.0));
         const d = new THREE.DirectionalLight(0xffffff,0.9); d.position.set(1,1.5,1); scene.add(d);
 
         const anchor = mindar.addAnchor(0);
-
         let model;
         await new Promise((res,rej)=>{
-          new GLTFLoader().load('./model.glb', (g)=>{ model=g.scene; model.scale.set(0.2,0.2,0.2); model.visible=false; anchor.group.add(model); res(); }, undefined, (e)=>rej(new Error('GLB読み込み失敗')) );
+          new GLTFLoader().load('./model.glb', (g)=>{ 
+            model=g.scene; 
+            model.scale.set(0.2,0.2,0.2); 
+            model.visible=false; 
+            anchor.group.add(model); 
+            res(); 
+          }, undefined, (e)=>rej(new Error('GLB読み込み失敗')) );
         });
 
         anchor.onTargetFound = ()=>{ model.visible=true; };
         anchor.onTargetLost  = ()=>{ model.visible=false; };
 
+        // 🔹 MindAR開始前にvideo要素の再生を保証（iOS対策）
+        const videoEl = mindar.video;
+        if (videoEl && videoEl.paused) {
+          await videoEl.play().catch(e=>log("video.playエラー:"+e));
+        }
+
         await mindar.start();
         log("mindar.start OK");
 
-        renderer.setAnimationLoop(()=>{ if (model.visible) model.rotation.y+=0.01; renderer.render(scene,camera); });
+        renderer.setAnimationLoop(()=>{
+          if (model.visible) model.rotation.y+=0.01;
+          renderer.render(scene,camera);
+        });
       }catch(e){
         log("ERROR: " + (e.name||"") + " " + (e.message||e));
       }
