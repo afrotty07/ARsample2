@@ -1,36 +1,62 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Marker WebAR (MindAR + A-Frame)</title>
-<style>html,body{margin:0;height:100%;background:#000}</style>
-<script src="https://cdn.jsdelivr.net/npm/aframe@1.5.0/dist/aframe.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>iOS カメラ診断</title>
+<style>
+  body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif}
+  video{width:100%;background:#000;max-height:70vh}
+  pre{white-space:pre-wrap;background:#111;color:#eee;padding:10px;border-radius:8px}
+  button{padding:10px 14px;border:none;border-radius:10px;background:#0a84ff;color:#fff;font-weight:700}
+</style>
 </head>
 <body>
-  <!-- アプリ内ブラウザ注意：Safari/HTTPS/許可必須 -->
-  <a-scene
-    mindar-image="imageTargetSrc: ./targets.mind;"
-    vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: false"
-    renderer="colorManagement: true, physicallyCorrectLights: true"
-    embedded
-  >
-    <a-assets>
-      <a-asset-item id="mdl" src="./model.glb"></a-asset-item>
-    </a-assets>
+  <h1>iOS カメラ診断</h1>
+  <p>Safariで開いてください（HTTPS必須）。</p>
+  <div style="display:flex;gap:8px;margin:8px 0 12px;">
+    <button id="startBack">背面カメラで開始</button>
+    <button id="startFront">前面カメラで開始</button>
+    <button id="list">カメラ一覧</button>
+  </div>
+  <video id="v" playsinline autoplay muted></video>
+  <h3>ログ</h3>
+  <pre id="log"></pre>
 
-    <!-- 照明 -->
-    <a-entity light="type: hemisphere; intensity: 1; color: #ffffff; groundColor: #444466"></a-entity>
-    <a-entity light="type: directional; intensity: 0.9" position="1 1.5 1"></a-entity>
+<script>
+const v = document.getElementById('v');
+const log = (m)=>{ const el=document.getElementById('log'); el.textContent += m+"\n"; };
 
-    <!-- ターゲット0にモデルをバインド -->
-    <a-entity mindar-image-target="targetIndex: 0">
-      <a-entity gltf-model="#mdl" scale="0.2 0.2 0.2" animation="property: rotation; to: 0 360 0; loop: true; dur: 10000; easing: linear"></a-entity>
-    </a-entity>
+async function start(constraints){
+  try{
+    const s = await navigator.mediaDevices.getUserMedia({video: constraints, audio:false});
+    v.srcObject = s;
+    const track = s.getVideoTracks()[0];
+    log("✅ getUserMedia成功: " + JSON.stringify(track.getSettings()));
+  }catch(e){
+    log("❌ getUserMedia失敗: " + (e.name||"") + " " + (e.message||e));
+  }
+}
 
-    <a-camera position="0 0 0"></a-camera>
-  </a-scene>
+document.getElementById('startBack').onclick = ()=> start({ facingMode:{ exact:'environment' }, width:{ideal:1280}, height:{ideal:720} });
+document.getElementById('startFront').onclick = ()=> start({ facingMode:'user', width:{ideal:1280}, height:{ideal:720} });
+
+document.getElementById('list').onclick = async ()=>{
+  try{
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    devs.forEach(d=> log(`${d.kind} | ${d.label||'(権限前は非表示)'} | ${d.deviceId}`));
+  }catch(e){ log("enumerateDevices失敗: "+e); }
+};
+
+// 環境チェック
+(() => {
+  const ua = navigator.userAgent;
+  const inApp = /(FBAN|FBAV|Instagram|Line|Twitter|WeChat|MicroMessenger)/i.test(ua);
+  const https = location.protocol === 'https:';
+  log(`UA: ${ua}`);
+  log(`HTTPS: ${https}`);
+  log(`アプリ内ブラウザ推定: ${inApp}`);
+})();
+</script>
 </body>
 </html>
